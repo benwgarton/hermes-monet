@@ -13,11 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
       - name: Install validation dependencies
         run: python -m pip install "pydantic>=2.7,<3" "pytest>=8,<10"
       - name: Run publication tests
