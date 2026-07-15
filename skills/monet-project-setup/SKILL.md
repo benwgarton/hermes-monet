@@ -1,7 +1,7 @@
 ---
 name: monet-project-setup
 description: Prepare projects for iPad-first Monet design review.
-version: 0.2.0
+version: 0.2.1
 author: Benjamin Garton (benwgarton), Hermes Agent
 license: MIT
 prerequisites:

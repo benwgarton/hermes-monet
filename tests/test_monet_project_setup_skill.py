@@ -7,9 +7,15 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 SKILL = Path(__file__).parents[1] / "skills" / "monet-project-setup"
 TAP = SKILL.parents[1]
+sys.path.insert(0, str(SKILL / "scripts"))
+
+from project_primer_runtime import PrimerError, load_project_primer  # noqa: E402
 
 
 def test_frontmatter_matches_hermes_contribution_contract() -> None:
@@ -72,3 +78,35 @@ def test_example_builds_and_verifies_as_secret_free(tmp_path: Path) -> None:
         "projectSlug": "example-site",
         "members": ["manifest.json", "primer.json", "project.json"],
     }
+
+
+def test_runtime_rejects_values_the_ipad_wire_cannot_accept() -> None:
+    def example() -> dict[str, Any]:
+        return json.loads((SKILL / "templates" / "example-primer.json").read_text(encoding="utf-8"))
+
+    unsafe_payloads: list[dict[str, Any]] = []
+
+    traversal = example()
+    traversal["project"]["repository"]["design_paths"] = ["../.env"]
+    unsafe_payloads.append(traversal)
+
+    duplicate_resource = example()
+    resources = duplicate_resource["connectors"][0]["resources"]
+    resources.append(dict(resources[0]))
+    unsafe_payloads.append(duplicate_resource)
+
+    oversized_design = example()
+    oversized_design["project"]["design_markdown"] = "x" * 200_001
+    unsafe_payloads.append(oversized_design)
+
+    credential_query = example()
+    credential_query["project"]["dev_url"] = "https://example.com?authorization=value"
+    unsafe_payloads.append(credential_query)
+
+    oversized_stack_item = example()
+    oversized_stack_item["stack"]["frameworks"] = ["x" * 121]
+    unsafe_payloads.append(oversized_stack_item)
+
+    for payload in unsafe_payloads:
+        with pytest.raises(PrimerError):
+            load_project_primer(payload)

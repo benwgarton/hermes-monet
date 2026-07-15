@@ -31,7 +31,9 @@ Updates are discovered with `hermes skills check` and installed with `hermes
 skills update`. Hermes applies its community-skill security scan during install
 and update.
 
-Version 0.2 adds the optional local `monet-pair` workflow. It requires the
+Version 0.2.1 adds stricter URL, path, and resource-key validation to the
+Project Primer runtime. Version 0.2 added the optional local `monet-pair`
+workflow. Pairing requires the
 canonical command installed by Monet Desktop; the skill never carries or
 reimplements credential transfer itself.
 

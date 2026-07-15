@@ -32,7 +32,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -71,7 +71,7 @@ _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 _SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}$")
 _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,127}$")
 _SECRET_KEY = re.compile(
-    r"(?i)(?:^|[_-])(password|passwd|secret|token|api[_-]?key|private[_-]?key|cookie|authorization|credential)(?:$|[_-])"
+    r"(?i)(?:^|[_-])(password|passwd|secret|token|api[_-]?key|private[_-]?key|cookies?|authorization|credentials?)(?:$|[_-])"
 )
 _SECRET_VALUE_PATTERNS = (
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
@@ -148,6 +148,20 @@ class RepositoryContext(StrictModel):
     subdirectory: str | None = Field(default=None, max_length=500)
     design_paths: list[str] = Field(default_factory=list, max_length=20)
 
+    @field_validator("design_paths")
+    @classmethod
+    def validate_design_paths(cls, paths: list[str]) -> list[str]:
+        for path in paths:
+            if (
+                not path
+                or len(path) > 1_000
+                or path.startswith("/")
+                or "\0" in path
+                or ".." in path.split("/")
+            ):
+                raise ValueError("design paths must be repository-relative paths without traversal")
+        return paths
+
 
 class PrimerProject(StrictModel):
     slug: str
@@ -158,7 +172,7 @@ class PrimerProject(StrictModel):
     local_url: str | None = None
     description: str | None = Field(default=None, max_length=4_000)
     known_facts: str | None = Field(default=None, max_length=50_000)
-    design_markdown: str | None = Field(default=None, max_length=1_000_000)
+    design_markdown: str | None = Field(default=None, max_length=200_000)
     repository: RepositoryContext | None = None
 
     @field_validator("slug")
@@ -173,12 +187,7 @@ class PrimerProject(StrictModel):
     def validate_url(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        parsed = urlparse(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise ValueError("must be an absolute http(s) URL")
-        if parsed.username or parsed.password:
-            raise ValueError("URLs must not contain embedded credentials")
-        return value
+        return _validate_http_url(value)
 
     @model_validator(mode="after")
     def require_capture_url(self) -> PrimerProject:
@@ -193,6 +202,20 @@ class TechnologyStack(StrictModel):
     package_manager: str | None = Field(default=None, max_length=80)
     rendering: RenderingMode = RenderingMode.UNKNOWN
     hosting: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("frameworks", "languages")
+    @classmethod
+    def validate_stack_items(cls, values: list[str]) -> list[str]:
+        if any(not value or len(value) > 120 for value in values):
+            raise ValueError("stack entries must contain 1 to 120 characters")
+        return values
+
+    @field_validator("hosting")
+    @classmethod
+    def validate_hosting_items(cls, values: list[str]) -> list[str]:
+        if any(not value or len(value) > 160 for value in values):
+            raise ValueError("hosting entries must contain 1 to 160 characters")
+        return values
 
 
 class CaptureProfile(StrictModel):
@@ -216,18 +239,29 @@ class CaptureProfile(StrictModel):
     def validate_representative_url(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        parsed = urlparse(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise ValueError("must be an absolute http(s) URL")
-        return value
+        return _validate_http_url(value)
 
     @field_validator("additional_paths")
     @classmethod
     def validate_paths(cls, paths: list[str]) -> list[str]:
         for path in paths:
-            if not path.startswith("/") or "\0" in path or ".." in path.split("/"):
+            if (
+                not path
+                or len(path) > 2_000
+                or not path.startswith("/")
+                or "\0" in path
+                or ".." in path.split("/")
+            ):
                 raise ValueError("additional paths must be absolute URL paths without traversal")
         return paths
+
+    @field_validator("include_patterns", "exclude_patterns")
+    @classmethod
+    def validate_patterns(cls, patterns: list[str]) -> list[str]:
+        for pattern in patterns:
+            if not pattern or len(pattern) > 500 or not pattern.startswith("/") or "\0" in pattern:
+                raise ValueError("crawl patterns must be absolute path globs")
+        return patterns
 
 
 class ResourceReference(StrictModel):
@@ -321,18 +355,20 @@ class ConnectorRequirement(StrictModel):
     def validate_url(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        parsed = urlparse(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise ValueError("must be an absolute http(s) URL")
-        if parsed.username or parsed.password:
-            raise ValueError("URLs must not contain embedded credentials")
-        return value
+        return _validate_http_url(value)
 
 
 class SetupPreferences(StrictModel):
     recommended_surface: RecommendedSurface = RecommendedSurface.IPAD
     offer_desktop_when_local: bool = True
     notes: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("notes")
+    @classmethod
+    def validate_notes(cls, notes: list[str]) -> list[str]:
+        if any(not note or len(note) > 1_000 for note in notes):
+            raise ValueError("setup notes must contain 1 to 1000 characters")
+        return notes
 
 
 class ProjectPrimer(StrictModel):
@@ -356,6 +392,10 @@ class ProjectPrimer(StrictModel):
         ]
         if len(slot_ids) != len(set(slot_ids)):
             raise ValueError("secret slot IDs must be unique across the Primer")
+        for connector in self.connectors:
+            resource_keys = [resource.key for resource in connector.resources]
+            if len(resource_keys) != len(set(resource_keys)):
+                raise ValueError("connector resource keys must be unique")
 
         source_url = {
             CrawlSource.LIVE: self.project.live_url,
@@ -373,6 +413,18 @@ class ProjectPrimer(StrictModel):
         if len(body) > MAX_PRIMER_JSON_BYTES:
             raise PrimerError("Project Primer is too large.")
         return body
+
+
+def _validate_http_url(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("must be an absolute http(s) URL")
+    if parsed.username or parsed.password:
+        raise ValueError("URLs must not contain embedded credentials")
+    for key, query_value in parse_qsl(parsed.query, keep_blank_values=True):
+        if query_value and _SECRET_KEY.search(key):
+            raise ValueError("URL query strings must not contain credential fields")
+    return value
 
 
 def _reject_secret_material(value: Any, *, path: tuple[str, ...] = ()) -> None:
