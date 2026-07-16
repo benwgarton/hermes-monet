@@ -31,6 +31,16 @@ Updates are discovered with `hermes skills check` and installed with `hermes
 skills update`. Hermes applies its community-skill security scan during install
 and update.
 
+## One-prompt setup
+
+After Hermes has built or opened a project, paste the bootstrap prompt in
+[PROMPT.md](PROMPT.md). The prompt explicitly authorizes only this public tap,
+installs or updates the skill, inspects the current project, creates and
+verifies a secret-free `.monetproj`, and leads with the iPad handoff.
+
+Private pairing remains a separate, explicit approval after the safe package
+has been generated. It is never started by the bootstrap prompt.
+
 Version 0.2.1 adds stricter URL, path, and resource-key validation to the
 Project Primer runtime. Version 0.2 added the optional local `monet-pair`
 workflow. Pairing requires the
