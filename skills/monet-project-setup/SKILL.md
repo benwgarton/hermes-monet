@@ -1,7 +1,7 @@
 ---
 name: monet-project-setup
 description: Prepare projects for iPad-first Monet design review.
-version: 0.2.1
+version: 0.2.2
 author: Benjamin Garton (benwgarton), Hermes Agent
 license: MIT
 prerequisites:
@@ -40,16 +40,16 @@ inspecting the actual repository and a reachable deployment when one exists.
   uses Hermes's existing Pydantic runtime and makes no network request.
 - Optional: the Monet MCP server for canonical `create_project_primer` calls.
 - Optional: signed Monet Desktop on macOS or Windows for direct opening.
-- Optional: canonical `monet-pair` on a local macOS or Windows computer for
-  user-approved private pairing.
+- Advanced: canonical `monet-pair` on a local macOS or Windows computer for a
+  private-value transfer the user explicitly requests.
 
 Monet Desktop has no Linux build. Hermes running on Linux or hosted
 infrastructure may still create the secret-free package for iPad, but must not
-offer desktop installation or private pairing.
+offer desktop installation or private transfer.
 
 Read [references/security.md](references/security.md) before inspecting the
-project. Read [references/pairing.md](references/pairing.md) before offering
-private pairing.
+project. Read [references/pairing.md](references/pairing.md) only after the user
+explicitly asks to transfer private values from a nearby computer.
 
 ## How to Run
 
@@ -86,7 +86,7 @@ bundled script because it uses the installed app's canonical validator. Keep
 | Recommended surface | Monet for iPad |
 | Desktop support | macOS Apple Silicon, macOS Intel, Windows |
 | Linux | Package handoff to iPad only; no desktop build |
-| Private pairing | Local macOS/Windows only, with `monet-pair` |
+| Nearby private transfer | Advanced, user-requested, local macOS/Windows only |
 
 ## Procedure
 
@@ -146,7 +146,7 @@ Start from the example template. Validation must succeed without bypasses. The
 builder returns:
 
 - A configuration-only `.monetproj` package.
-- A compact `https://iammonet.com/setup#p1...` link when it fits.
+- A compact clickable `https://iammonet.com/setup#p1...` link when it fits.
 - Local Monet Desktop installation status.
 - `recommendedSurface: ipad` and `containsSecrets: false`.
 
@@ -168,7 +168,7 @@ Then adapt to the runtime:
   or Intel Mac download at `https://iammonet.com/buy#desktop-download`.
 - Local Windows: offer iPad first, then the official Windows build.
 - Hosted/headless Hermes: provide the package and setup link for iPad. Do not
-  offer installation or pairing.
+  offer installation or private transfer.
 - Linux: provide the package/setup link for iPad. Do not suggest Wine or an
   unofficial build.
 
@@ -183,15 +183,17 @@ Monet imports the safe configuration and shows a resumable checklist:
 - Files/Drive/Dropbox: select the referenced folder through the native picker.
 - Capture: validate the representative URL before crawling.
 
-Credential values are entered or paired on the destination and stored in its
+Credential values are normally entered on the destination and stored in its
 Keychain. The Primer remains safe to share.
 
-### 7. Offer private pairing only when safe
+### 7. Transfer private values only when the user asks
 
-Private pairing is optional. Offer it only when Hermes runs interactively on a
-local macOS or Windows computer, the iPad shares a trusted local network, the
-canonical `monet-pair` command is installed, and the user approves each source
-environment-variable name.
+Do not mention this during the normal handoff. Monet's connector checklist is
+the default setup path. If the user explicitly asks to transfer private values
+from this nearby computer, explain that it is an optional one-time encrypted
+transfer, then proceed only when Hermes runs interactively on local macOS or
+Windows, the iPad shares a trusted local network, canonical `monet-pair` is
+installed, and the user approves each source environment-variable name.
 
 Invoke through `terminal` only after approval:
 
@@ -201,10 +203,11 @@ monet-pair primer.json \
   --secret vercel-bypass=VERCEL_AUTOMATION_BYPASS_SECRET
 ```
 
-Do not use `--yes` unless approval occurred in the current interaction. Tell
-the user to scan the QR, compare the same four-digit code on both devices, and
-select the destination values they approve. Nothing starts selected. Stop on
-a code mismatch.
+Do not use `--yes` unless approval occurred in the current interaction. Present
+the result as "Transfer from nearby computer," not as required QR setup. The
+user may open the one-time link or scan its code with the iPad Camera, then
+compares the same four-digit code on both devices and selects the destination
+values they approve. Nothing starts selected. Stop on a code mismatch.
 
 The link carries a local address, expiring session ID, and public key, never a
 credential. X25519, HKDF-SHA256, and AES-256-GCM protect the one-client,
@@ -219,9 +222,9 @@ key. The session expires within ten minutes and clears values after success.
 - Never add shell commands, arbitrary JavaScript, lifecycle hooks, or an
   installer to a Primer.
 - Never read an environment-variable value during Primer generation.
-- Never pair from hosted/cloud Hermes, Linux, a public address, a tunnel, or an
-  unattended task.
-- Do not describe pairing as PIN encryption. The four-digit code is a SAS.
+- Never transfer from hosted/cloud Hermes, Linux, a public address, a tunnel,
+  or an unattended task.
+- Do not describe the transfer as PIN encryption. The four-digit code is a SAS.
 - Do not infer connector access or scopes that inspection did not establish.
 - Do not silently open or install Monet Desktop.
 

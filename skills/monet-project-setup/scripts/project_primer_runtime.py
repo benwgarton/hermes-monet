@@ -620,10 +620,10 @@ def write_project_primer_package(primer: ProjectPrimer, output: Path) -> Path:
 
 
 def encode_setup_url(primer: ProjectPrimer) -> str | None:
-    """Encode a small secret-free Primer in a URL fragment for QR handoff.
+    """Encode a small secret-free Primer in a URL fragment for direct opening.
 
     Fragments are not sent to iammonet.com. Oversized configurations return
-    ``None`` and should travel as a `.monetproj` file or future pairing link.
+    ``None`` and should travel as a `.monetproj` file.
     """
 
     compressed = zlib.compress(primer.canonical_json(), level=9)

@@ -1,8 +1,9 @@
-# Private pairing protocol
+# Nearby private transfer protocol
 
-Private pairing is an optional second act after a secret-free Project Primer
-has been imported. It is not part of `.monetproj` and does not make the package
-sensitive.
+Private transfer is an advanced, user-requested second act after a secret-free
+Project Primer has been imported. It is not part of `.monetproj` and does not
+make the package sensitive. Do not offer it during the normal handoff; Monet's
+native connector checklist is the default path.
 
 ## Preconditions
 
@@ -13,15 +14,16 @@ sensitive.
 - The user approves each source environment-variable name before the command
   runs.
 
-Do not pair from hosted/cloud Hermes, Linux, a public address, a VPN/tunnel, or
-an unattended task. Use Monet's setup checklist instead.
+Do not transfer from hosted/cloud Hermes, Linux, a public address, a VPN/tunnel,
+or an unattended task. Use Monet's setup checklist instead.
 
 ## User contract
 
 1. State the Primer slot label, purpose, and environment-variable name. Never
    print or inspect the value.
 2. Ask for explicit approval before starting the server.
-3. Generate the QR with `monet-pair`; never construct a pairing link manually.
+3. Start the one-time transfer with `monet-pair`; never construct its link
+   manually. Present QR scanning only as one way to open that link on iPad.
 4. Ask the user to compare the four-digit short authentication string on both
    devices. Stop on a mismatch.
 5. The iPad starts with no values selected. The user chooses each value to

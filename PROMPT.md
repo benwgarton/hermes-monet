@@ -41,9 +41,9 @@ which destination-side setup steps remain. Do not install or open Monet
 Desktop unless I explicitly choose the macOS or Windows alternative. There is
 no Linux desktop build.
 
-Do not start private pairing automatically. After the safe package is ready,
-you may offer optional local encrypted pairing only if you are running
-interactively on this local macOS or Windows computer and canonical monet-pair
-is installed. Pair only after a separate approval, require me to compare the
-four-digit code on both devices, and transfer only values I explicitly select.
+Finish private connector setup inside Monet by default. Do not mention or start
+private transfer during the normal handoff. Only if I explicitly ask to move
+private values from this nearby computer may you offer the optional local
+encrypted transfer. It requires canonical monet-pair, a separate approval, a
+matching four-digit code on both devices, and my selection of every value.
 ```
