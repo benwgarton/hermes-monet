@@ -18,6 +18,8 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install validation dependencies
-        run: python -m pip install "pydantic>=2.7,<3" "pytest>=8,<10"
+        run: python -m pip install "pydantic>=2.7,<3" "pytest>=8,<10" "ruff>=0.9,<1"
+      - name: Lint skill runtime and tests
+        run: ruff check skills tests
       - name: Run publication tests
         run: python -m pytest -q tests

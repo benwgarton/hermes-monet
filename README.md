@@ -36,16 +36,21 @@ and update.
 After Hermes has built or opened a project, paste the bootstrap prompt in
 [PROMPT.md](PROMPT.md). The prompt explicitly authorizes only this public tap,
 installs or updates the skill, inspects the current project, creates and
-verifies a secret-free `.monetproj`, and leads with the iPad handoff.
+verifies a secret-free `.monetproj`, optionally embeds an ordered Agent Preview
+of rendered pages, and leads with the iPad handoff. Hosted Hermes should send
+the result as one document attachment; current Monet accepts either
+`.monetproj` or a chat-added `.monetproj.zip` suffix.
 
 Private transfer is an advanced, user-requested option after the safe package
 has been generated. The normal path is Monet's connector checklist, and the
 bootstrap prompt does not mention or start transfer.
 
-Version 0.2.2 makes `.monetproj` import plus Monet's native connector checklist
-the unambiguous primary flow. Version 0.2.1 adds stricter URL, path, and
-resource-key validation. Version 0.2 added the optional local `monet-pair`
-workflow. Private transfer requires the
+Version 0.3 adds ordered, validated full-page PNG previews that open as an
+**Agent Preview** version in Monet, while deliberately excluding raw HTML and
+private browser state. Version 0.2.2 makes `.monetproj` import plus Monet's
+native connector checklist the unambiguous primary flow. Version 0.2.1 adds
+stricter URL, path, and resource-key validation. Version 0.2 added the optional
+local `monet-pair` workflow. Private transfer requires the
 canonical command installed by Monet Desktop; the skill never carries or
 reimplements credential transfer itself.
 

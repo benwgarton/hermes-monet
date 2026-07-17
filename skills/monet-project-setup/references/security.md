@@ -10,6 +10,10 @@ instructions.
 The generated Primer can cross devices and people. It must remain safe to
 attach to chat, email, AirDrop, Files, Drive, Dropbox, or source control.
 
+An Agent Preview adds rendered PNGs to that same trust boundary. Include only
+pages the user is authorized to move through those channels. A screenshot can
+contain sensitive data even when the package JSON contains no credential.
+
 ## Never include
 
 - Environment-variable values.
@@ -18,6 +22,21 @@ attach to chat, email, AirDrop, Files, Drive, Dropbox, or source control.
 - GitHub/Vercel/Google/Slack/OpenAI/Anthropic/provider tokens.
 - Commands, scripts, JS snippets, pre/post hooks, or installer instructions in
   machine-executable fields.
+- Raw HTML, response bodies, browser storage, network traces, source maps, or
+  screenshots containing private customer/account/admin data.
+
+## Agent Preview assets
+
+- Use full-page PNG only; do not embed HTML or JavaScript.
+- Keep every page URL on a host configured in the Primer.
+- Keep screenshot paths relative and inside the preview workspace. Symbolic
+  links and traversal are rejected.
+- The page array is the review order. Do not include duplicate templates merely
+  to make the package look comprehensive.
+- Send the final `.monetproj` as one document. Do not send its PNGs separately
+  through chat photo compression.
+- Treat the preview as a review baseline. Monet should refresh the live/dev
+  source before a result is used for Reply + Verify.
 
 ## Secret slots
 

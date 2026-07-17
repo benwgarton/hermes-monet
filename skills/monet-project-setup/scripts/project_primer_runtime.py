@@ -24,6 +24,7 @@ import os
 import platform
 import re
 import stat
+import struct
 import subprocess
 import sys
 import zipfile
@@ -66,6 +67,12 @@ PRIMER_SCHEMA_VERSION = 1
 PRIMER_SETUP_URL = "https://iammonet.com/setup"
 MAX_PRIMER_JSON_BYTES = 256_000
 MAX_INLINE_SETUP_URL_CHARS = 2_900
+MAX_PREVIEW_PAGES = 100
+MAX_PREVIEW_IMAGE_BYTES = 64_000_000
+MAX_PREVIEW_TOTAL_BYTES = 500_000_000
+MAX_PREVIEW_IMAGE_PIXELS = 100_000_000
+AGENT_PREVIEW_CAPTURE_KIND = "agent-preview"
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 _SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}$")
@@ -87,6 +94,18 @@ _SECRET_VALUE_PATTERNS = (
 
 class PrimerError(ValueError):
     """Raised when a Primer is unsafe or cannot be packaged."""
+
+
+def _safe_validation_message(label: str, error: ValidationError) -> str:
+    """Describe validation failures without echoing attacker-controlled input."""
+
+    details: list[str] = []
+    for item in error.errors(include_url=False, include_input=False)[:8]:
+        location = ".".join(str(component) for component in item.get("loc", ()))
+        message = str(item.get("msg", "invalid value"))
+        details.append(f"{location}: {message}" if location else message)
+    suffix = "; ".join(details) if details else "validation failed"
+    return f"Invalid {label}: {suffix}"
 
 
 class StrictModel(BaseModel):
@@ -113,6 +132,14 @@ class Viewport(StrEnum):
 class ColorScheme(StrEnum):
     LIGHT = "light"
     DARK = "dark"
+
+
+class CaptureBrowser(StrEnum):
+    CHROMIUM = "chromium"
+    CHROME = "chrome"
+    EDGE = "edge"
+    FIREFOX = "firefox"
+    WEBKIT = "webkit"
 
 
 class RenderingMode(StrEnum):
@@ -264,6 +291,85 @@ class CaptureProfile(StrictModel):
         return patterns
 
 
+class AgentPreviewPage(StrictModel):
+    """One public rendered page included in an Agent Preview Pack."""
+
+    url: str
+    page_slug: str
+    screenshot: str
+    page_title: str | None = Field(default=None, max_length=500)
+    viewport_width: Annotated[int | None, Field(default=None, ge=1, le=10_000)]
+    viewport_height: Annotated[int | None, Field(default=None, ge=1, le=100_000)]
+    scroll_height: Annotated[int | None, Field(default=None, ge=1, le=250_000)]
+    meta_description: str | None = Field(default=None, max_length=5_000)
+    canonical_url: str | None = None
+    h1: str | None = Field(default=None, max_length=2_000)
+
+    @field_validator("url", "canonical_url")
+    @classmethod
+    def validate_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_http_url(value)
+
+    @field_validator("page_slug")
+    @classmethod
+    def validate_page_slug(cls, value: str) -> str:
+        if not _SLUG.fullmatch(value):
+            raise ValueError("page_slug must be a lowercase URL-safe path segment")
+        return value
+
+    @field_validator("screenshot")
+    @classmethod
+    def validate_screenshot_path(cls, value: str) -> str:
+        path = Path(value)
+        if (
+            not value
+            or len(value) > 1_000
+            or path.is_absolute()
+            or "\0" in value
+            or ".." in path.parts
+            or path.suffix.lower() != ".png"
+        ):
+            raise ValueError("screenshot must be a relative PNG path without traversal")
+        return path.as_posix()
+
+
+class AgentPreview(StrictModel):
+    """Secret-free metadata for one agent-rendered review baseline."""
+
+    label: str = Field(default="Hermes Preview", min_length=1, max_length=160)
+    captured_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    captured_with: CaptureBrowser = CaptureBrowser.CHROMIUM
+    viewport: Viewport = Viewport.DESKTOP
+    color_scheme: ColorScheme = ColorScheme.LIGHT
+    notes: str | None = Field(default=None, max_length=4_000)
+    pages: list[AgentPreviewPage] = Field(min_length=1, max_length=MAX_PREVIEW_PAGES)
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, value: str) -> str:
+        if any(character in value for character in ("/", "\\", "\0")):
+            raise ValueError("preview label must be one safe path component")
+        return value
+
+    @model_validator(mode="after")
+    def validate_preview(self) -> AgentPreview:
+        slugs = [page.page_slug for page in self.pages]
+        if len(slugs) != len(set(slugs)):
+            raise ValueError("preview page_slug values must be unique")
+        _reject_secret_material(
+            {
+                "label": self.label,
+                "notes": self.notes,
+                "pages": [
+                    page.model_dump(mode="json", exclude={"screenshot"}) for page in self.pages
+                ],
+            }
+        )
+        return self
+
+
 class ResourceReference(StrictModel):
     key: str
     value: str = Field(min_length=1, max_length=2_000)
@@ -347,7 +453,7 @@ class ConnectorRequirement(StrictModel):
     @classmethod
     def validate_kind(cls, value: str) -> str:
         if value not in CONNECTOR_KINDS:
-            raise ValueError(f"unsupported connector kind: {value}")
+            raise ValueError("unsupported connector kind")
         return value
 
     @field_validator("url")
@@ -484,10 +590,97 @@ def load_project_primer(value: str | bytes | Path | dict[str, Any]) -> ProjectPr
                 raise PrimerError("Project Primer is too large.")
             return ProjectPrimer.model_validate_json(body)
         return ProjectPrimer.model_validate(value)
-    except (OSError, ValidationError, ValueError) as error:
-        if isinstance(error, PrimerError):
-            raise
-        raise PrimerError(f"Invalid Project Primer: {error}") from error
+    except PrimerError:
+        raise
+    except ValidationError as error:
+        raise PrimerError(_safe_validation_message("Project Primer", error)) from error
+    except (OSError, ValueError) as error:
+        raise PrimerError("Invalid Project Primer.") from error
+
+
+def load_agent_preview(path: Path) -> AgentPreview:
+    """Load a strict Agent Preview manifest from a regular JSON file."""
+
+    try:
+        metadata = path.stat()
+        if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+            raise PrimerError("Agent Preview manifest must be a regular file.")
+        if metadata.st_size > MAX_PRIMER_JSON_BYTES:
+            raise PrimerError("Agent Preview manifest is too large.")
+        return AgentPreview.model_validate_json(path.read_bytes())
+    except PrimerError:
+        raise
+    except ValidationError as error:
+        raise PrimerError(_safe_validation_message("Agent Preview", error)) from error
+    except (OSError, ValueError) as error:
+        raise PrimerError("Invalid Agent Preview.") from error
+
+
+def _configured_project_hosts(primer: ProjectPrimer) -> set[str]:
+    hosts: set[str] = set()
+    for value in (primer.project.live_url, primer.project.dev_url, primer.project.local_url):
+        if value and (hostname := urlparse(value).hostname):
+            hosts.add(hostname.lower().removeprefix("www."))
+    return hosts
+
+
+def _png_dimensions(path: Path) -> tuple[int, int]:
+    with path.open("rb") as stream:
+        header = stream.read(24)
+    if len(header) != 24 or header[:8] != _PNG_SIGNATURE or header[12:16] != b"IHDR":
+        raise PrimerError(f"Agent Preview screenshot is not a valid PNG: {path.name}")
+    width, height = struct.unpack(">II", header[16:24])
+    if width == 0 or height == 0 or width * height > MAX_PREVIEW_IMAGE_PIXELS:
+        raise PrimerError(f"Agent Preview screenshot dimensions are unsafe: {path.name}")
+    return width, height
+
+
+def _validated_preview_assets(
+    primer: ProjectPrimer,
+    preview: AgentPreview,
+    preview_root: Path,
+) -> list[tuple[AgentPreviewPage, Path, int, int]]:
+    if len(preview.pages) > primer.capture.max_pages:
+        raise PrimerError(
+            "Agent Preview contains more pages than the Primer capture.max_pages policy."
+        )
+
+    root = preview_root.resolve(strict=True)
+    configured_hosts = _configured_project_hosts(primer)
+    assets: list[tuple[AgentPreviewPage, Path, int, int]] = []
+    total_bytes = 0
+    for page in preview.pages:
+        hostname = (urlparse(page.url).hostname or "").lower().removeprefix("www.")
+        if configured_hosts and hostname not in configured_hosts:
+            raise PrimerError(
+                f"Agent Preview URL host is not configured in the Primer: {page.url}"
+            )
+
+        candidate = preview_root / page.screenshot
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(root)
+        except (OSError, ValueError) as error:
+            raise PrimerError(
+                f"Agent Preview screenshot is outside the preview folder: {page.screenshot}"
+            ) from error
+        relative = candidate.relative_to(preview_root)
+        cursor = preview_root
+        for part in relative.parts:
+            cursor /= part
+            if cursor.is_symlink():
+                raise PrimerError(
+                    f"Agent Preview screenshots cannot use symbolic links: {page.screenshot}"
+                )
+        metadata = resolved.stat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_PREVIEW_IMAGE_BYTES:
+            raise PrimerError(f"Agent Preview screenshot is too large: {page.screenshot}")
+        total_bytes += metadata.st_size
+        if total_bytes > MAX_PREVIEW_TOTAL_BYTES:
+            raise PrimerError("Agent Preview screenshots exceed the total safe size limit.")
+        width, height = _png_dimensions(resolved)
+        assets.append((page, resolved, width, height))
+    return assets
 
 
 def _connector_config(requirement: ConnectorRequirement) -> dict[str, Any]:
@@ -579,19 +772,30 @@ def _project_dto(primer: ProjectPrimer) -> dict[str, Any]:
     }
 
 
-def build_project_primer_package(primer: ProjectPrimer) -> bytes:
-    """Create a configuration-only `.monetproj` ZIP in memory."""
+def build_project_primer_package(
+    primer: ProjectPrimer,
+    *,
+    preview: AgentPreview | None = None,
+    preview_root: Path | None = None,
+) -> bytes:
+    """Create a secret-free `.monetproj`, optionally with a rendered preview."""
 
     from io import BytesIO
 
     now = datetime.now(UTC)
+    preview_assets: list[tuple[AgentPreviewPage, Path, int, int]] = []
+    if preview is not None:
+        if preview_root is None:
+            raise PrimerError("Agent Preview packaging requires its manifest folder.")
+        preview_assets = _validated_preview_assets(primer, preview, preview_root)
+
     manifest = {
         "formatVersion": FORMAT_VERSION,
         "exportedAt": now.isoformat(),
         "exportedByID": "monet-project-primer",
         "exportedByName": primer.generated_by.name,
         "appBuild": None,
-        "versionCount": 0,
+        "versionCount": 1 if preview is not None else 0,
     }
     out = BytesIO()
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -601,10 +805,71 @@ def build_project_primer_package(primer: ProjectPrimer) -> bytes:
             json.dumps(_project_dto(primer), ensure_ascii=False, indent=2),
         )
         archive.writestr("primer.json", primer.canonical_json())
+        if preview is not None:
+            pages = []
+            for review_order, (page, screenshot, image_width, image_height) in enumerate(
+                preview_assets
+            ):
+                pages.append(
+                    {
+                        "url": page.url,
+                        "pageSlug": page.page_slug,
+                        "reviewOrder": review_order,
+                        "pageTitle": page.page_title,
+                        "viewportW": page.viewport_width or image_width,
+                        "viewportH": page.viewport_height,
+                        "scrollHeight": page.scroll_height or image_height,
+                        "capturedAt": preview.captured_at.isoformat(),
+                        "metaDescription": page.meta_description,
+                        "ogTitle": None,
+                        "ogDescription": None,
+                        "ogImage": None,
+                        "canonicalURL": page.canonical_url,
+                        "h1": page.h1,
+                        "seoNotes": None,
+                        "hasDOMMetadata": False,
+                        "hasDOMElementMap": None,
+                        "hasFreehand": False,
+                        "notes": [],
+                        "annotations": [],
+                    }
+                )
+                archive.write(
+                    screenshot,
+                    f"versions/hermes-preview/pages/{page.page_slug}.png",
+                )
+
+            provenance = (
+                "Rendered by Hermes for immediate review. Refresh from the website in "
+                "Monet before using this version as a verification baseline."
+            )
+            if preview.notes:
+                provenance = f"{provenance}\n\n{preview.notes}"
+            version = {
+                "label": preview.label,
+                "capturedAt": preview.captured_at.isoformat(),
+                "notes": provenance,
+                "viewport": preview.viewport.value,
+                "colorScheme": preview.color_scheme.value,
+                "capturedWith": preview.captured_with.value,
+                "captureKind": AGENT_PREVIEW_CAPTURE_KIND,
+                "parentVersionLabel": None,
+                "pages": pages,
+            }
+            archive.writestr(
+                "versions/hermes-preview/version.json",
+                json.dumps(version, ensure_ascii=False, indent=2),
+            )
     return out.getvalue()
 
 
-def write_project_primer_package(primer: ProjectPrimer, output: Path) -> Path:
+def write_project_primer_package(
+    primer: ProjectPrimer,
+    output: Path,
+    *,
+    preview: AgentPreview | None = None,
+    preview_root: Path | None = None,
+) -> Path:
     """Write one validated Primer package and return its final path."""
 
     if output.suffix.lower() != ".monetproj":
@@ -612,7 +877,13 @@ def write_project_primer_package(primer: ProjectPrimer, output: Path) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     temp = output.with_name(f".{output.name}.{os.getpid()}.tmp")
     try:
-        temp.write_bytes(build_project_primer_package(primer))
+        temp.write_bytes(
+            build_project_primer_package(
+                primer,
+                preview=preview,
+                preview_root=preview_root,
+            )
+        )
         temp.replace(output)
     finally:
         temp.unlink(missing_ok=True)
@@ -713,16 +984,24 @@ def _cli() -> int:
     parser = argparse.ArgumentParser(description="Build a secret-free Monet Project Primer.")
     parser.add_argument("input", type=Path, help="Project Primer JSON")
     parser.add_argument("--output", type=Path, default=Path.cwd())
+    parser.add_argument("--preview", type=Path, help="Optional Agent Preview JSON")
     parser.add_argument("--open", action="store_true", dest="open_package")
     args = parser.parse_args()
     try:
         primer = load_project_primer(args.input)
-        package = write_project_primer_package(primer, args.output)
+        preview = load_agent_preview(args.preview) if args.preview else None
+        package = write_project_primer_package(
+            primer,
+            args.output,
+            preview=preview,
+            preview_root=args.preview.parent if args.preview else None,
+        )
         result = {
             "package": str(package),
             "setupURL": encode_setup_url(primer),
             "desktop": desktop_installation_status(),
             "recommendedSurface": "ipad",
+            "previewPages": len(preview.pages) if preview else 0,
         }
         print(json.dumps(result, indent=2))
         if args.open_package:
