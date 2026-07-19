@@ -1,7 +1,7 @@
 ---
 name: monet-project-setup
 description: Build iPad-first Monet projects with rendered previews.
-version: 0.3.0
+version: 0.3.1
 author: Benjamin Garton (benwgarton), Hermes Agent
 license: MIT
 prerequisites:
@@ -17,11 +17,12 @@ metadata:
 # Monet Project Setup Skill
 
 Inspect a website, PWA, or app repository and create a validated, secret-free
-Monet Project Primer. When a deployment can be rendered safely, include an
-ordered Agent Preview of full-page PNG screenshots so the project opens ready
-for review on iPad. Recommend Monet for iPad first; offer Monet Desktop only as
-an explicit macOS or Windows alternative. This skill never installs Monet,
-stores credentials or raw HTML in a package, or offers a Linux desktop build.
+Project Primer (`.monetproj`) for Monet (https://iammonet.com), so a human can
+design-review the project and send a structured Handoff Pack back to Hermes.
+When a deployment can be rendered safely, include an ordered Agent Preview of
+full-page PNG screenshots so the project opens ready to annotate, iPad first.
+It does not review the site itself, scrape arbitrary sites, install software,
+or put credentials or raw HTML into a package.
 
 ## When to Use
 
